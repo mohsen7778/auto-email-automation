@@ -24,7 +24,7 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 8000
 
 # Non-root user for security
-RUN useradd -m appuser
-USER appuser
+RUN useradd -m -u 10001 appuser
+USER 10001
 
 CMD ["python", "main.py"]
