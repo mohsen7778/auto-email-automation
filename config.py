@@ -29,6 +29,10 @@ SEND_DELAY_MAX: float = float(os.getenv("SEND_DELAY_MAX", "5"))
 DAILY_SEND_LIMIT: int = int(os.getenv("DAILY_SEND_LIMIT", "100"))
 MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
 
+# ── GitHub Models (GPT-4o-mini) ───────────────────────────────────────────────
+GH_MODELS_TOKEN: str = os.getenv("GH_MODELS_TOKEN", "")
+PORTFOLIO_URL: str = os.getenv("PORTFOLIO_URL", "https://astruxmarketing.pages.dev")
+
 # ── App ───────────────────────────────────────────────────────────────────────
 PORT: int = int(os.getenv("PORT", "8000"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
