@@ -49,7 +49,8 @@ log = logging.getLogger(__name__)
     S_TMPL_TAG,
     S_TMPL_SUBJECT,
     S_TMPL_BODY,
-) = range(5)
+    S_AISEND_LEADS,
+) = range(6)
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z0-9.\-]+")
 
@@ -622,6 +623,102 @@ async def cmd_markreplied(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# /aisend  — AI writes personalized email per lead's website
+# ═════════════════════════════════════════════════════════════════════════════
+@admin_only
+async def cmd_aisend_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(
+        "🤖 *AI Email Mode*\n\n"
+        "Send leads in the format:\n"
+        "`NAME:email:website`\n\n"
+        "Separate multiple leads with commas. Example:\n"
+        "`ABC Clinic:abc@gmail.com:abcclinic.com, XYZ Gym:xyz@gmail.com:xyzgym.com`\n\n"
+        "AI will visit each website, analyze it, and write a unique personalized email.",
+        parse_mode="Markdown",
+    )
+    return S_AISEND_LEADS
+
+
+async def aisend_receive_leads(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    from ai_writer import generate_email
+    from config import PORTFOLIO_URL
+    from email_service import send_email
+
+    text = update.message.text.strip()
+    entries = [e.strip() for e in text.split(",") if e.strip()]
+
+    parsed = []
+    errors = []
+
+    for entry in entries:
+        parts = [p.strip() for p in entry.split(":")]
+        if len(parts) < 3:
+            errors.append(f"• `{entry}` — use NAME:email:website format")
+            continue
+        name    = parts[0]
+        email   = parts[1].lower()
+        website = parts[2]
+        if not EMAIL_RE.fullmatch(email):
+            errors.append(f"• `{entry}` — invalid email")
+            continue
+        parsed.append((name, email, website))
+
+    if not parsed:
+        await update.message.reply_text(
+            "❌ No valid entries.\n" + "\n".join(errors),
+            parse_mode="Markdown",
+        )
+        return S_AISEND_LEADS
+
+    msg = f"✅ Got *{len(parsed)}* lead(s). AI is now writing personalized emails..."
+    if errors:
+        msg += "\n\n⚠️ Skipped:\n" + "\n".join(errors)
+    status = await update.message.reply_text(msg, parse_mode="Markdown")
+
+    sent_ok = 0
+    failed  = 0
+
+    for i, (name, email, website) in enumerate(parsed, 1):
+        try:
+            await status.edit_text(
+                f"✍️ Writing email {i}/{len(parsed)} for *{name}*...",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+
+        # AI generates the email
+        subject, body = await generate_email(name, email, website, PORTFOLIO_URL)
+
+        # Send via Brevo
+        success, err = await send_email(email, name, subject, body)
+
+        if success:
+            sent_ok += 1
+            # Save to MongoDB as used lead
+            try:
+                await db.insert_lead(name, email, "ai_outreach")
+                await db.mark_lead_sent(email, "ai_outreach")
+            except Exception:
+                pass  # Already exists is fine
+        else:
+            failed += 1
+            log.warning("AI send failed for %s: %s", email, err)
+
+        if i < len(parsed):
+            delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX)
+            await asyncio.sleep(delay)
+
+    await update.message.reply_text(
+        f"🤖 AI sending complete!\n"
+        f"✅ Sent: {sent_ok}\n"
+        f"❌ Failed: {failed}",
+        parse_mode="Markdown",
+    )
+    return ConversationHandler.END
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # /cancel  (end any conversation)
 # ═════════════════════════════════════════════════════════════════════════════
 async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
@@ -657,11 +754,21 @@ def build_application() -> Application:
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
     )
 
+    # ── Conversation: /aisend ─────────────────────────────────────────────────
+    aisend_conv = ConversationHandler(
+        entry_points=[CommandHandler("aisend", cmd_aisend_start)],
+        states={
+            S_AISEND_LEADS: [MessageHandler(filters.TEXT & ~filters.COMMAND, aisend_receive_leads)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+    )
+
     # ── Register handlers ─────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",          cmd_start))
     app.add_handler(CommandHandler("cancel",         cmd_cancel))
     app.add_handler(add_conv)
     app.add_handler(tmpl_conv)
+    app.add_handler(aisend_conv)
     app.add_handler(CommandHandler("remove",         cmd_remove))
     app.add_handler(CommandHandler("removetemplate", cmd_removetemplate))
     app.add_handler(CommandHandler("listtemplates",  cmd_listtemplates))
@@ -688,7 +795,7 @@ async def set_commands(app: Application) -> None:
         BotCommand("addtemplate",    "Add/update email template"),
         BotCommand("removetemplate", "Remove template by niche tag"),
         BotCommand("listtemplates",  "List all templates"),
-        BotCommand("send",           "Send emails by niche tag"),
+        BotCommand("aisend",         "AI writes personalized email per website"),
         BotCommand("retry",          "Retry failed emails"),
         BotCommand("stats",          "View statistics"),
         BotCommand("inbox",          "Check inbox for replies"),
