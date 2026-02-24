@@ -78,8 +78,8 @@ Your job:
 - Be warm, confident and conversational, not salesy
 - Provide real value by explaining what those weak points are costing them
 - Tell them you can fix it and show them what that looks like
-- Ask them to visit {portfolio_url} to see your work
-- End by telling them they can reply to this email OR find contact options on the portfolio site
+- Do NOT include any links or URLs anywhere in the email
+- End by saying if they want to see examples of our work they can just reply to this email and we will send them over
 - Be between 120 and 180 words total, no more
 - NO bullet points, NO numbered lists, NO headers
 - NO dashes, hyphens, em dashes or any kind of dash character anywhere
