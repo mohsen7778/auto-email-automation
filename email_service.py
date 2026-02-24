@@ -1,47 +1,25 @@
 """
-email_service.py - Brevo (Sendinblue) transactional email sending
-Uses plain httpx (no heavy SDK) to keep RAM low.
+email_service.py - Gmail SMTP email sending
+Sends directly via Gmail SMTP using App Password.
+Better deliverability than third party services.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import smtplib
 import textwrap
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional
 
-import httpx
-
-from config import BREVO_API_KEY, SENDER_EMAIL, SENDER_NAME
+from config import SENDER_EMAIL, SENDER_NAME, GMAIL_APP_PASSWORD
 
 log = logging.getLogger(__name__)
 
-BREVO_URL = "https://api.brevo.com/v3/smtp/email"
-
-_client: Optional[httpx.AsyncClient] = None
-
-
-def get_http_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(
-            timeout=15.0,
-            headers={
-                "api-key": BREVO_API_KEY,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
-    return _client
-
-
-async def close_http_client() -> None:
-    global _client
-    if _client and not _client.is_closed:
-        await _client.aclose()
-
 
 def _build_html(body_text: str) -> str:
-    """Wrap plain-text body in a minimal, clean HTML email shell."""
-    # Convert newlines to <br> and wrap in HTML
+    """Wrap plain-text body in minimal HTML."""
     html_body = body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html_body = html_body.replace("\n", "<br>\n")
     return textwrap.dedent(f"""\
@@ -66,66 +44,55 @@ def _build_html(body_text: str) -> str:
     """)
 
 
+def _send_smtp(to_email: str, to_name: str, subject: str, body_text: str) -> tuple[bool, str]:
+    """Send email via Gmail SMTP (blocking — run in thread)."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = f"{SENDER_NAME} <{SENDER_EMAIL}>"
+        msg["To"]      = f"{to_name} <{to_email}>"
+
+        # Plain text version
+        msg.attach(MIMEText(body_text, "plain"))
+        # HTML version
+        msg.attach(MIMEText(_build_html(body_text), "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
+            server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
+
+        log.info("Email sent via Gmail → %s (%s)", to_email, to_name)
+        return True, "OK"
+
+    except smtplib.SMTPAuthenticationError:
+        msg = "Gmail auth failed — check SENDER_EMAIL and GMAIL_APP_PASSWORD"
+        log.error(msg)
+        return False, msg
+    except Exception as exc:
+        msg = f"SMTP error: {exc}"
+        log.error("Email error → %s | %s", to_email, msg)
+        return False, msg
+
+
 async def send_email(
     to_email: str,
     to_name: str,
     subject: str,
     body_text: str,
 ) -> tuple[bool, str]:
-    """
-    Send a single email via Brevo.
-    Returns (success: bool, message: str).
-    """
-    html_content = _build_html(body_text)
-    payload = {
-        "sender": {"name": SENDER_NAME, "email": SENDER_EMAIL},
-        "to": [{"email": to_email, "name": to_name}],
-        "subject": subject,
-        "htmlContent": html_content,
-        "textContent": body_text,
-        "replyTo": {"email": SENDER_EMAIL, "name": SENDER_NAME},
-        "headers": {
-            "X-Mailer": "ColdEmailBot/1.0",
-        },
-    }
-
-    try:
-        client = get_http_client()
-        resp = await client.post(BREVO_URL, json=payload)
-        if resp.status_code in (200, 201):
-            log.info("Email sent → %s (%s)", to_email, to_name)
-            return True, "OK"
-        else:
-            msg = f"Brevo {resp.status_code}: {resp.text[:300]}"
-            log.warning("Email failed → %s | %s", to_email, msg)
-            return False, msg
-    except httpx.RequestError as exc:
-        msg = f"Network error: {exc}"
-        log.error("Email error → %s | %s", to_email, msg)
-        return False, msg
+    """Async wrapper around blocking SMTP call."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, _send_smtp, to_email, to_name, subject, body_text
+    )
 
 
-async def check_brevo_inbox(
-    page: int = 1,
-    limit: int = 20,
-) -> list[dict]:
-    """
-    Poll Brevo transactional events for replies.
-    Brevo doesn't expose raw replies, so we check the 'events' endpoint
-    for inbound activity.  Full reply detection requires an inbound domain
-    or webhook – this polls for recent events.
-    """
-    try:
-        client = get_http_client()
-        resp = await client.get(
-            "https://api.brevo.com/v3/smtp/statistics/events",
-            params={"event": "reply", "limit": limit, "offset": (page - 1) * limit},
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("events", [])
-        log.warning("Inbox poll failed: %s %s", resp.status_code, resp.text[:200])
-        return []
-    except Exception as exc:
-        log.error("Inbox poll error: %s", exc)
-        return []
+async def check_brevo_inbox(*args, **kwargs) -> list:
+    """Stub — not used with Gmail SMTP."""
+    return []
+
+
+async def close_http_client() -> None:
+    """Stub — no HTTP client to close."""
+    pass
+
