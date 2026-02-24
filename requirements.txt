@@ -1,3 +1,6 @@
+# AI email writer
+openai==1.35.3
+
 # Web framework
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
