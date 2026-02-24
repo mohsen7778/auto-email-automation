@@ -18,8 +18,8 @@ ADMIN_CHAT_IDS: list[int] = [
 MONGO_URI: str = os.environ["MONGO_URI"]
 MONGO_DB_NAME: str = os.getenv("MONGO_DB_NAME", "cold_email_bot")
 
-# ── Brevo (Sendinblue) API ────────────────────────────────────────────────────
-BREVO_API_KEY: str = os.environ["BREVO_API_KEY"]
+# ── Gmail SMTP ────────────────────────────────────────────────────────────────
+GMAIL_APP_PASSWORD: str = os.environ["GMAIL_APP_PASSWORD"]
 SENDER_NAME: str = os.getenv("SENDER_NAME", "My Company")
 SENDER_EMAIL: str = os.environ["SENDER_EMAIL"]
 
