@@ -704,6 +704,10 @@ async def aisend_receive_leads(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -
         else:
             failed += 1
             log.warning("AI send failed for %s: %s", email, err)
+            await update.message.reply_text(
+                f"❌ Failed for `{email}`:\n`{err}`",
+                parse_mode="Markdown",
+            )
 
         if i < len(parsed):
             delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX)
